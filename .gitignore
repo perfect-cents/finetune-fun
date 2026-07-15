@@ -1,2 +1,14 @@
 # Unstoppable Code multi-repo child repositories
 repos/
+
+# Training artifacts
+outputs/
+wandb/
+runs/
+*.gguf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

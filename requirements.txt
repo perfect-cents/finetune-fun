@@ -1,0 +1,20 @@
+# Core Hugging Face stack
+transformers>=4.46.0
+datasets>=3.0.0
+trl>=0.12.0
+peft>=0.13.0
+accelerate>=1.0.0
+
+# QLoRA 4-bit quantization (NVIDIA GPU only)
+bitsandbytes>=0.44.0
+
+# Speed + low-VRAM patches over the HF stack.
+# NOTE: install this on the rented GPU, NOT on your Mac — Unsloth needs CUDA.
+# On the GPU box the recommended install is actually:
+#   pip install "unsloth[cu121-torch240] @ git+https://github.com/unslothai/unsloth.git"
+# (pick the tag matching the box's CUDA/torch — see README). This line is a fallback.
+unsloth
+
+# Progress dashboard — pick one (both are wired up in train.py)
+wandb>=0.18.0
+tensorboard>=2.18.0
