@@ -6,6 +6,7 @@ outputs/
 wandb/
 runs/
 *.gguf
+*.tar.gz
 
 # Python
 __pycache__/

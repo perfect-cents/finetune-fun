@@ -163,7 +163,13 @@ python export_gguf.py --adapter outputs/lora_adapter --quant q4_k_m
 The first run builds `llama.cpp` under the hood, so it can take a few minutes. Output lands in
 `outputs/gguf/` — a `*.gguf` file plus a `Modelfile` whose `FROM` already points at it.
 
-**Download `outputs/gguf/` to your Mac**, then (with [Ollama](https://ollama.com) installed):
+**Package the artifact** for download with the helper (tars it into one file):
+
+```bash
+bash pack.sh gguf       # -> gguf.tar.gz   (or: pack.sh adapter | pack.sh all)
+```
+
+**Download `outputs/gguf/` (or the `.tar.gz`) to your Mac**, then (with [Ollama](https://ollama.com) installed):
 
 ```bash
 cd outputs/gguf
@@ -190,6 +196,7 @@ reasoning in its replies.
 | `eval.py` | Tool-use eval: checks `<think>` + valid tool calls on held-out prompts (base vs finetuned) |
 | `runpod_setup.sh` | One-shot RunPod bootstrap: installs deps and verifies the GPU/stack |
 | `quiet.py` | Silences noisy transformers/unsloth import warnings; imported first by the other scripts |
+| `pack.sh` | Tars a trained artifact (`adapter`/`gguf`/`all`) into one `.tar.gz` for easy download off the pod |
 | `export_gguf.py` | Merges the adapter, quantizes to GGUF, writes an Ollama `Modelfile` for local Mac use |
 | `data/example_dataset.jsonl` | 15-example pirate-persona demo (fallback / simpler format reference) |
 | `requirements.txt` | The HF stack + Unsloth + tracking libraries |
