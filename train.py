@@ -21,6 +21,7 @@ so you never hand-write Qwen's special tokens.
 import argparse
 import json
 import os
+import random
 
 
 def parse_args():
@@ -88,63 +89,106 @@ def normalize_messages(messages):
     return fixed
 
 
-def load_hub_dataset(repo_id):
-    """Load a Hub dataset's train split, tolerating unparseable card metadata.
+def coerce_row(row):
+    """Some sources store `messages`/`tools` as JSON strings; parse them back."""
+    row = dict(row)
+    for key in ("messages", "tools"):
+        val = row.get(key)
+        if isinstance(val, str):
+            try:
+                row[key] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return row
 
-    Some dataset cards declare feature types a given `datasets` version can't
-    parse (e.g. grug-think declares a 'Json' feature). That errors while reading
-    the *card* — before any rows load. Fall back to reading the raw data files
-    directly, which infers the schema from the data and skips the card entirely.
+
+def resolve_data_files(repo_id):
+    """Return local paths to a Hub dataset's train data files (downloaded + cached)."""
+    from huggingface_hub import HfFileSystem, hf_hub_download
+
+    fs = HfFileSystem()
+    candidates = fs.glob(f"datasets/{repo_id}/**/*.jsonl") or \
+        fs.glob(f"datasets/{repo_id}/**/*.parquet")
+    if not candidates:
+        raise FileNotFoundError(f"No .jsonl/.parquet data files found in dataset '{repo_id}'.")
+    # Prefer files that look like the train split (skip heldout/rl/eval files).
+    train_files = [c for c in candidates if "train" in c.rsplit("/", 1)[-1].lower()]
+    chosen = train_files or candidates
+    prefix = f"datasets/{repo_id}/"
+    print(f"Reading raw data file(s): {chosen}")
+    return [hf_hub_download(repo_id, filename=c[len(prefix):], repo_type="dataset")
+            for c in chosen]
+
+
+def load_raw_rows(dataset, subsample, seed):
+    """Read a JSONL/Parquet dataset into plain Python dicts, bypassing Arrow schema
+    inference.
+
+    Function-calling `tools` schemas differ from row to row (each function has its
+    own parameter keys), so there is no single Arrow struct that fits them all — the
+    standard loaders raise a 'Couldn't cast' / unknown-feature error. Reading the
+    raw file ourselves keeps `tools` as arbitrary nested JSON and sidesteps that.
     """
-    from datasets import load_dataset
+    paths = [dataset] if os.path.exists(dataset) else resolve_data_files(dataset)
 
-    try:
-        return load_dataset(repo_id, split="train")
-    except Exception as e:
-        print(f"Standard load failed ({type(e).__name__}: {e}).")
-        print("Falling back to reading raw data files from the Hub...")
-        from huggingface_hub import HfFileSystem
+    if all(p.endswith((".jsonl", ".json")) for p in paths):
+        # Reservoir sampling: one streaming pass, only `subsample` lines held in memory.
+        rng = random.Random(seed)
+        reservoir, seen = [], 0
+        for p in paths:
+            with open(p) as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    seen += 1
+                    if not subsample or subsample <= 0 or len(reservoir) < subsample:
+                        reservoir.append(line)
+                    elif (j := rng.randint(0, seen - 1)) < subsample:
+                        reservoir[j] = line
+        print(f"Read {seen} rows; using {len(reservoir)}.")
+        return [json.loads(line) for line in reservoir]
 
-        fs = HfFileSystem()
-        candidates = fs.glob(f"datasets/{repo_id}/**/*.jsonl") or \
-            fs.glob(f"datasets/{repo_id}/**/*.parquet")
-        if not candidates:
-            raise
-        # Prefer files that look like the train split (avoid heldout/rl/eval files).
-        train_files = [f for f in candidates if "train" in f.rsplit("/", 1)[-1].lower()]
-        chosen = train_files or candidates
-        builder = "json" if chosen[0].endswith(".jsonl") else "parquet"
-        print(f"Loading {len(chosen)} file(s) with the '{builder}' builder: {chosen}")
-        return load_dataset(builder, data_files=[f"hf://{f}" for f in chosen], split="train")
+    # Parquet fallback (its own fixed schema, so a plain read is fine).
+    import pyarrow.parquet as pq
+
+    rows = []
+    for p in paths:
+        rows.extend(pq.read_table(p).to_pylist())
+    if subsample and 0 < subsample < len(rows):
+        rows = random.Random(seed).sample(rows, subsample)
+    return rows
 
 
 def build_dataset(args, tokenizer):
-    from datasets import load_dataset
+    from datasets import Dataset
 
-    if os.path.exists(args.dataset):
-        ds = load_dataset("json", data_files=args.dataset, split="train")
-    else:
-        ds = load_hub_dataset(args.dataset)
+    rows = load_raw_rows(args.dataset, args.subsample, args.seed)
 
-    if args.subsample and 0 < args.subsample < len(ds):
-        ds = ds.shuffle(seed=args.seed).select(range(args.subsample))
-
-    def render(example):
-        messages = normalize_messages(example["messages"])
-        tools = example.get("tools") or None
+    # Render each conversation to a single training string, entirely in Python —
+    # no Arrow involved until the final all-strings dataset below.
+    texts, skipped = [], 0
+    for row in rows:
+        row = coerce_row(row)
+        messages = normalize_messages(row["messages"])
+        tools = row.get("tools") or None
         try:
             text = tokenizer.apply_chat_template(
                 messages, tools=tools, tokenize=False, add_generation_prompt=False
             )
         except Exception:
-            text = ""  # skip rows the template can't render
-        return {"text": text}
+            skipped += 1
+            continue
+        # Drop rows that would be truncated, so we never train on half a tool call.
+        if not text or len(tokenizer(text).input_ids) > args.max_seq_len:
+            skipped += 1
+            continue
+        texts.append(text)
 
-    ds = ds.map(render, remove_columns=ds.column_names)
-    ds = ds.filter(lambda e: len(e["text"]) > 0)
-    # Drop rows that would be truncated, so we never train on half a tool call.
-    ds = ds.filter(lambda e: len(tokenizer(e["text"]).input_ids) <= args.max_seq_len)
-    return ds
+    if skipped:
+        print(f"Skipped {skipped} rows (render failed or exceeded --max-seq-len {args.max_seq_len}).")
+    if not texts:
+        raise SystemExit("No usable training examples after filtering — check --max-seq-len.")
+    return Dataset.from_dict({"text": texts})
 
 
 def main():
