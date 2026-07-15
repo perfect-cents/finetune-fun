@@ -88,13 +88,43 @@ def normalize_messages(messages):
     return fixed
 
 
+def load_hub_dataset(repo_id):
+    """Load a Hub dataset's train split, tolerating unparseable card metadata.
+
+    Some dataset cards declare feature types a given `datasets` version can't
+    parse (e.g. grug-think declares a 'Json' feature). That errors while reading
+    the *card* — before any rows load. Fall back to reading the raw data files
+    directly, which infers the schema from the data and skips the card entirely.
+    """
+    from datasets import load_dataset
+
+    try:
+        return load_dataset(repo_id, split="train")
+    except Exception as e:
+        print(f"Standard load failed ({type(e).__name__}: {e}).")
+        print("Falling back to reading raw data files from the Hub...")
+        from huggingface_hub import HfFileSystem
+
+        fs = HfFileSystem()
+        candidates = fs.glob(f"datasets/{repo_id}/**/*.jsonl") or \
+            fs.glob(f"datasets/{repo_id}/**/*.parquet")
+        if not candidates:
+            raise
+        # Prefer files that look like the train split (avoid heldout/rl/eval files).
+        train_files = [f for f in candidates if "train" in f.rsplit("/", 1)[-1].lower()]
+        chosen = train_files or candidates
+        builder = "json" if chosen[0].endswith(".jsonl") else "parquet"
+        print(f"Loading {len(chosen)} file(s) with the '{builder}' builder: {chosen}")
+        return load_dataset(builder, data_files=[f"hf://{f}" for f in chosen], split="train")
+
+
 def build_dataset(args, tokenizer):
     from datasets import load_dataset
 
     if os.path.exists(args.dataset):
         ds = load_dataset("json", data_files=args.dataset, split="train")
     else:
-        ds = load_dataset(args.dataset, split="train")
+        ds = load_hub_dataset(args.dataset)
 
     if args.subsample and 0 < args.subsample < len(ds):
         ds = ds.shuffle(seed=args.seed).select(range(args.subsample))
