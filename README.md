@@ -95,6 +95,12 @@ the small trained matrices, not the whole model).
 python inference.py --adapter outputs/lora_adapter
 ```
 
+By default this offers the model a small example tool menu **and prefills `<think>`** so
+you actually see grug-think's reasoning — the model reasons inside `<think>` tags when
+deciding which tool to call, so with no tools and no prefill it just answers plainly. Toggle
+with `--no-tools` / `--no-think`. The reliable way to *force* reasoning is the prefill: the
+prompt ends with an open `<think>` tag, so the model has to continue from inside a thought.
+
 ## Measure whether it worked
 
 Plain chat won't test what grug-think teaches. `eval.py` feeds held-out prompts *with* tool
@@ -183,6 +189,7 @@ reasoning in its replies.
 | `inference.py` | Interactive chat with the finetuned adapter |
 | `eval.py` | Tool-use eval: checks `<think>` + valid tool calls on held-out prompts (base vs finetuned) |
 | `runpod_setup.sh` | One-shot RunPod bootstrap: installs deps and verifies the GPU/stack |
+| `quiet.py` | Silences noisy transformers/unsloth import warnings; imported first by the other scripts |
 | `export_gguf.py` | Merges the adapter, quantizes to GGUF, writes an Ollama `Modelfile` for local Mac use |
 | `data/example_dataset.jsonl` | 15-example pirate-persona demo (fallback / simpler format reference) |
 | `requirements.txt` | The HF stack + Unsloth + tracking libraries |

@@ -18,6 +18,8 @@ model's own chat template is applied automatically (including tool rendering),
 so you never hand-write Qwen's special tokens.
 """
 
+import quiet  # noqa: E402  — must precede transformers/unsloth to silence import spam
+
 import argparse
 import json
 import os
@@ -195,6 +197,7 @@ def main():
     args = parse_args()
 
     from unsloth import FastLanguageModel
+    quiet.hush()
 
     # 1. Load the base model in 4-bit. Unsloth returns a normal PEFT-ready model.
     model, tokenizer = FastLanguageModel.from_pretrained(

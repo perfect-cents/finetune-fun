@@ -1,16 +1,53 @@
 """
-Chat with your freshly finetuned adapter.
+Chat with your finetuned adapter — with tools available and <think> reasoning
+forced on, so you actually see the grug-think behavior the model was trained for.
 
     python inference.py --adapter outputs/lora_adapter
 
-Loads the base model + your LoRA adapter and runs an interactive prompt so you
-can hear your model talk in its new voice. Ctrl-C or type 'quit' to exit.
+    # Plain chat, no tools, no forced thinking:
+    python inference.py --no-tools --no-think
+
+Why the defaults matter: grug-think reasons inside <think> tags when deciding
+which tool to call. So we (1) pass a small example tool menu and (2) prefill the
+"<think>" tag to force the model to start reasoning. Ctrl-C or 'quit' to exit.
 """
+
+import quiet  # noqa: E402  — must precede transformers/unsloth to silence import spam
 
 import argparse
 
 from transformers import TextStreamer
 from unsloth import FastLanguageModel
+
+quiet.hush()
+
+# A small example tool menu so the model has something to reason about / call.
+EXAMPLE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string", "description": "City name"}},
+                "required": ["city"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": "Evaluate an arithmetic expression",
+            "parameters": {
+                "type": "object",
+                "properties": {"expression": {"type": "string", "description": "e.g. '12 * 7'"}},
+                "required": ["expression"],
+            },
+        },
+    },
+]
 
 
 def parse_args():
@@ -18,30 +55,31 @@ def parse_args():
     p.add_argument("--adapter", default="outputs/lora_adapter")
     p.add_argument("--max-seq-len", type=int, default=2048)
     p.add_argument("--max-new-tokens", type=int, default=256)
-    p.add_argument(
-        "--system",
-        default="You are a helpful assistant. Think step by step inside <think> tags "
-        "before answering.",
-        help="System prompt. Note: grug-think is a tool-use dataset, so the model's "
-        "grug-style reasoning shows up in <think> tags. To exercise real function "
-        "calling you'd pass tool definitions via the chat template (see README).",
-    )
+    p.add_argument("--temperature", type=float, default=0.7)
+    p.add_argument("--system", default="You are a helpful assistant with access to tools. "
+                   "Reason about the request inside <think> tags, then act.")
+    p.add_argument("--no-think", dest="force_think", action="store_false",
+                   help="Don't prefill <think> (let the model decide whether to reason).")
+    p.add_argument("--no-tools", dest="use_tools", action="store_false",
+                   help="Don't offer any tools (plain chat).")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
 
-    # Loading the adapter path also pulls the base model it was trained on.
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=args.adapter,
         max_seq_length=args.max_seq_len,
         load_in_4bit=True,
     )
     FastLanguageModel.for_inference(model)  # ~2x faster generation
-
     streamer = TextStreamer(tokenizer, skip_prompt=True)
-    print("Chatting with your model. Type 'quit' to exit.\n")
+
+    tools = EXAMPLE_TOOLS if args.use_tools else None
+    print("Chatting with your model"
+          f"{' (tools available)' if tools else ''}"
+          f"{', <think> forced' if args.force_think else ''}. Type 'quit' to exit.\n")
 
     while True:
         try:
@@ -58,17 +96,24 @@ def main():
             {"role": "system", "content": args.system},
             {"role": "user", "content": user_msg},
         ]
-        inputs = tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            return_tensors="pt",
-        ).to(model.device)
+        # Render to text so we can prefill "<think>" onto the end of the prompt.
+        prompt = tokenizer.apply_chat_template(
+            messages, tools=tools, tokenize=False, add_generation_prompt=True
+        )
+        if args.force_think:
+            prompt += "<think>"
+        # add_special_tokens=False: the template already emits the special tokens.
+        # Passing the attention_mask (returned here) avoids the pad/eos warning.
+        inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
 
-        print("bot> ", end="")
+        # Echo the prefilled tag so the streamed reasoning reads as one block.
+        print("bot> " + ("<think>" if args.force_think else ""), end="", flush=True)
         model.generate(
-            input_ids=inputs,
+            **inputs,
             max_new_tokens=args.max_new_tokens,
-            temperature=0.7,
+            do_sample=True,
+            temperature=args.temperature,
+            pad_token_id=tokenizer.eos_token_id,
             streamer=streamer,
         )
         print()

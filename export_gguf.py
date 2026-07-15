@@ -15,11 +15,15 @@ Then, on your Mac (see README):
     ollama run grug
 """
 
+import quiet  # noqa: E402  — must precede transformers/unsloth to silence import spam
+
 import argparse
 import glob
 import os
 
 from unsloth import FastLanguageModel
+
+quiet.hush()
 
 # A minimal ChatML template — correct for chatting with Qwen and seeing the grug
 # <think> reasoning. (Full tool-calling through Ollama needs the tools-aware

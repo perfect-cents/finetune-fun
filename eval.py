@@ -14,11 +14,15 @@ real tool definitions and a user request, then we check the generated output for
   3. a tool name that actually exists in that case's tool list.
 """
 
+import quiet  # noqa: E402  — must precede transformers/unsloth to silence import spam
+
 import argparse
 import json
 import re
 
 from unsloth import FastLanguageModel
+
+quiet.hush()
 
 # Held-out prompts the model never trained on. Each has its own tool menu.
 TEST_CASES = [
