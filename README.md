@@ -81,6 +81,21 @@ Useful flags: `--subsample 5000` (or `0` for all 101k), `--model unsloth/Qwen3-4
 `--epochs 2`, `--lora-rank 32`, `--max-seq-len 4096` (keeps longer conversations, needs
 more VRAM). Run `python train.py --help` for the full list.
 
+### Watching the loss curve (TensorBoard)
+
+`--report-to tensorboard` (the default) writes loss / learning-rate / grad-norm to event
+files under `outputs/runs/<timestamp>/`. To view them:
+
+1. **When deploying the RunPod pod, expose HTTP port `6006`** (add it in the pod's port config).
+2. In a **second terminal** on the pod, launch the viewer:
+   ```bash
+   bash tensorboard.sh          # serves outputs/ on 0.0.0.0:6006
+   ```
+3. Open the **proxied URL for port 6006** from the pod's *Connect* menu.
+
+For a short run you may not need this at all — the loss also prints to the terminal every
+step. Use `--report-to none` if you want to skip event-file logging entirely.
+
 > **Why subsample?** `grug-think` teaches a *skill* (agentic tool use), not just a style,
 > so you want thousands of examples — but not all 101k for a first pass. 3–5k rows trains
 > in well under an hour on a 4090 and is enough to see the model pick up the grug `<think>`
@@ -197,6 +212,7 @@ reasoning in its replies.
 | `runpod_setup.sh` | One-shot RunPod bootstrap: installs deps and verifies the GPU/stack |
 | `quiet.py` | Silences noisy transformers/unsloth import warnings; imported first by the other scripts |
 | `pack.sh` | Tars a trained artifact (`adapter`/`gguf`/`all`) into one `.tar.gz` for easy download off the pod |
+| `tensorboard.sh` | Launches TensorBoard (bound to `0.0.0.0:6006`) to watch the training curves on RunPod |
 | `export_gguf.py` | Merges the adapter, quantizes to GGUF, writes an Ollama `Modelfile` for local Mac use |
 | `data/example_dataset.jsonl` | 15-example pirate-persona demo (fallback / simpler format reference) |
 | `requirements.txt` | The HF stack + Unsloth + tracking libraries |
