@@ -143,19 +143,35 @@ Tips for a first project:
 
 ---
 
-## Taking it home (optional): run on your Mac via Ollama
+## Taking it home: run on your Mac via Ollama
 
-After training, export to GGUF so you can run it locally on Apple Silicon with no GPU:
+Once trained, export to GGUF so the model runs locally on your Apple Silicon Mac with no GPU.
 
-```python
-# on the GPU box, after training — merges LoRA + base and quantizes to GGUF
-from unsloth import FastLanguageModel
-model, tokenizer = FastLanguageModel.from_pretrained("outputs/lora_adapter", load_in_4bit=True)
-model.save_pretrained_gguf("outputs/gguf", tokenizer, quantization_method="q4_k_m")
+**On the RunPod box** (after training — this merges the LoRA into the base model, quantizes,
+and writes a ready-to-use `Modelfile`):
+
+```bash
+python export_gguf.py --adapter outputs/lora_adapter --quant q4_k_m
 ```
 
-Download the resulting `.gguf`, then on your Mac: `ollama create bytebeard -f Modelfile`
-(a one-line `Modelfile` pointing at the gguf) and `ollama run bytebeard`.
+The first run builds `llama.cpp` under the hood, so it can take a few minutes. Output lands in
+`outputs/gguf/` — a `*.gguf` file plus a `Modelfile` whose `FROM` already points at it.
+
+**Download `outputs/gguf/` to your Mac**, then (with [Ollama](https://ollama.com) installed):
+
+```bash
+cd outputs/gguf
+ollama create grug -f Modelfile
+ollama run grug
+```
+
+You'll be chatting with your finetuned model locally — watch for the grug-style `<think>`
+reasoning in its replies.
+
+> **Tool-calling note:** the generated `Modelfile` uses a plain ChatML template, which is great
+> for *chatting* with the model and seeing its reasoning. Exercising real function-calling
+> through Ollama needs the fuller tools-aware Qwen2.5 template — drop it into the `TEMPLATE`
+> block (Ollama's own `qwen2.5` model page shows it) if you want to test tool use locally.
 
 ---
 
@@ -167,5 +183,6 @@ Download the resulting `.gguf`, then on your Mac: `ollama create bytebeard -f Mo
 | `inference.py` | Interactive chat with the finetuned adapter |
 | `eval.py` | Tool-use eval: checks `<think>` + valid tool calls on held-out prompts (base vs finetuned) |
 | `runpod_setup.sh` | One-shot RunPod bootstrap: installs deps and verifies the GPU/stack |
+| `export_gguf.py` | Merges the adapter, quantizes to GGUF, writes an Ollama `Modelfile` for local Mac use |
 | `data/example_dataset.jsonl` | 15-example pirate-persona demo (fallback / simpler format reference) |
 | `requirements.txt` | The HF stack + Unsloth + tracking libraries |
