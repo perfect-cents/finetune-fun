@@ -30,15 +30,30 @@ of experimentation. **Stop/terminate the instance when done** so you're not bill
 
 ---
 
-## Setup (on the rented GPU)
+## Running on RunPod
 
-```bash
-git clone <your-repo-url> && cd finetune-fun
-pip install -r requirements.txt
-```
+1. **Deploy a pod.** In the RunPod console, deploy a GPU pod (an **RTX 4090** is plenty) using
+   an official **PyTorch template with CUDA 12.1+**. Give it ~40GB disk so model downloads fit.
+2. **Open a terminal** on the pod (the web terminal or JupyterLab, both in the RunPod UI).
+3. **Get the code on the pod** — clone this repo:
+   ```bash
+   git clone https://github.com/<you>/finetune-fun.git && cd finetune-fun
+   git checkout perfect-cents/explore-qwen-finetuning
+   ```
+   (Or drag the files into JupyterLab if you'd rather not push to GitHub.)
+4. **Bootstrap the environment** — installs deps and verifies the GPU/stack in one shot:
+   ```bash
+   bash runpod_setup.sh            # add --preview to also render one training example
+   ```
+5. **Train, eval, and pull the adapter off the pod** (see below). The adapter in
+   `outputs/lora_adapter/` is only a few MB — download it via JupyterLab's file browser, or
+   `runpodctl send outputs/lora_adapter`, before you terminate the pod.
+6. **⚠️ Terminate the pod** in the RunPod console when done — a stopped pod still bills for
+   storage, and a running one bills by the second.
 
-If the plain `unsloth` install gives trouble, use the CUDA-matched install (check the box's
-CUDA/torch with `nvidia-smi` and `python -c "import torch; print(torch.__version__)"`), e.g.:
+If `runpod_setup.sh`'s plain `unsloth` install ever fails on a particular image, use the
+CUDA-matched install instead (check the box with `nvidia-smi` and
+`python -c "import torch; print(torch.__version__)"`), e.g.:
 
 ```bash
 pip install "unsloth[cu121-torch240] @ git+https://github.com/unslothai/unsloth.git"
@@ -151,5 +166,6 @@ Download the resulting `.gguf`, then on your Mac: `ollama create bytebeard -f Mo
 | `train.py` | Loads Qwen in 4-bit, attaches LoRA, renders messages+tools, trains on assistant turns, saves adapter |
 | `inference.py` | Interactive chat with the finetuned adapter |
 | `eval.py` | Tool-use eval: checks `<think>` + valid tool calls on held-out prompts (base vs finetuned) |
+| `runpod_setup.sh` | One-shot RunPod bootstrap: installs deps and verifies the GPU/stack |
 | `data/example_dataset.jsonl` | 15-example pirate-persona demo (fallback / simpler format reference) |
 | `requirements.txt` | The HF stack + Unsloth + tracking libraries |
